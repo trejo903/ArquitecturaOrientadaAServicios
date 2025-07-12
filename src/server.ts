@@ -3,6 +3,8 @@ import morgan from 'morgan'
 import { db } from './config/db'
 import colors from 'colors'
 import menu from './routes/MenuRouter'
+import cors from "cors";
+
 
 export async function connectDB() {
     try {
@@ -19,7 +21,7 @@ connectDB()
 const app = express()
 
 app.use(morgan('dev'))
-
+app.use(cors({ origin: "http://localhost:3000" }));
 app.use(express.json())
 
 app.use('/api/chatbot',menu)
