@@ -1,7 +1,7 @@
 // whatsappHelper.ts
 import axios from 'axios'
 
-const WA_URL = `https://graph.facebook.com/v16.0/654446084427127/messages`
+const WA_URL = `https://graph.facebook.com/v23.0/654446084427127/messages`
 const HEADERS = {
   'Content-Type': 'application/json',
   Authorization: `Bearer EAARt5paboZC8BPDbqIjocLuI5fEcQJI3ngJ1ZAZCRIVz8ZAEbscplO114MZB76jIfWV79pjLxw4cwNLN0y22Br4qZCLCvNj37bnZAPdcwY8lT2SphYkqzH1anHiQ5yhboAxt5aWlUX7mZCMdM0ZBcYl9WS4yeZC9QmppLnf4GFfqir7LsV9XhDZBJvcpslHKRmgF2ddZAzQbMDRUC603QSPjSkm1KLZB1Ej4EltUnPuXOVyzc`,

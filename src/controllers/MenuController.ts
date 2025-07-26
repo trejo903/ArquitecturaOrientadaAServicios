@@ -28,7 +28,6 @@ export class MenuController {
     }
   }
 
-  // POST /webhook → recepción de mensajes
   static mensajesFacebook2 = async (req: Request, res: Response) => {
     console.log('[Webhook POST] Entrando a mensajesFacebook2')
     const data = req.body
@@ -39,7 +38,7 @@ export class MenuController {
     console.log('[Webhook POST] Payload recibido:', JSON.stringify(data))
 
     try {
-      // Atención: es "value", no "values"
+      // Es "value", no "values"
       const message = data?.entry?.[0]?.changes?.[0]?.value?.messages?.[0]
       if (!message) {
         console.log('[Webhook POST] No se encontró mensaje en el payload')
@@ -48,26 +47,32 @@ export class MenuController {
       }
       console.log('[Webhook POST] Mensaje parseado:', message)
 
-      const from = message.from     // número E.164 sin '+'
+      const from = message.from      // e.g. "5216121234567"
       const text = message.text?.body?.toLowerCase() || ''
       console.log(`[Webhook POST] De: ${from} — Texto: "${text}"`)
 
-      // ejemplo de palabras clave
-      const palabrasClave = ['hola']
-      if (palabrasClave.some(saludo => text.includes(saludo))) {
+      // Detectar saludo
+      if (text.includes('hola')) {
         console.log('[Webhook POST] Detectado saludo ("hola"), enviando plantilla…')
-        await sendTemplate(
-          from,
-          'saludo',   // nombre exacto de la plantilla en tu panel
-          'es_MX',    // código de idioma registrado
-          [
-            { type: 'button', sub_type: 'quick_reply', index: '0' },
-            { type: 'button', sub_type: 'quick_reply', index: '1' },
-            { type: 'button', sub_type: 'quick_reply', index: '2' },
-            { type: 'button', sub_type: 'quick_reply', index: '3' },
-            { type: 'button', sub_type: 'quick_reply', index: '4' },
-          ]
-        )
+        try {
+          await sendTemplate(
+            from,
+            'saludo',   // nombre exacto de la plantilla
+            'es_MX',    // código de idioma
+            [
+              // Ajusta la cantidad de índices a los botones que definiste en tu plantilla
+              { type: 'button', sub_type: 'quick_reply', index: '0' },
+              { type: 'button', sub_type: 'quick_reply', index: '1' }
+            ]
+          )
+          console.log('[Webhook POST] Plantilla enviada correctamente')
+        } catch (err: any) {
+          console.error(
+            '[Webhook POST] Error enviando plantilla:',
+            err.response?.status,
+            JSON.stringify(err.response?.data, null, 2)
+          )
+        }
       } else {
         console.log('[Webhook POST] Ninguna palabra clave coincide')
       }
@@ -81,6 +86,11 @@ export class MenuController {
       return
     }
   }
+
+
+
+
+
 
   // POST /menu
   static createMenu = async (req: Request, res: Response) => {
