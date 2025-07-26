@@ -6,12 +6,13 @@ import PedidoItem from '../models/PedidoItem'
 import Usuario from '../models/Usuarios'
 import fs from 'fs'
 import csv from 'csv-parser'
+import { sendTemplate } from '../utils/whatsappHelper'
 
 const verifyToken = 'EAARt5paboZC8BPDbqIjocLuI5fEcQJI3ngJ1ZAZCRIVz8ZAEbscplO114MZB76jIfWV79pjLxw4cwNLN0y22Br4qZCLCvNj37bnZAPdcwY8lT2SphYkqzH1anHiQ5yhboAxt5aWlUX7mZCMdM0ZBcYl9WS4yeZC9QmppLnf4GFfqir7LsV9XhDZBJvcpslHKRmgF2ddZAzQbMDRUC603QSPjSkm1KLZB1Ej4EltUnPuXOVyzc'
 
 export class MenuController {
   // GET /webhook → verificación
-  static mensajesFacebook = (req: Request, res: Response) => {
+ static mensajesFacebook = (req: Request, res: Response) => {
     console.log('[Webhook GET] Entrando a mensajesFacebook', req.query)
     const hubVerifyToken = req.query['hub.verify_token']
     const hubChallenge = req.query['hub.challenge']
@@ -47,24 +48,32 @@ export class MenuController {
       }
       console.log('[Webhook POST] Mensaje parseado:', message)
 
-      const from = message.from
+      const from = message.from     // número E.164 sin '+'
       const text = message.text?.body?.toLowerCase() || ''
       console.log(`[Webhook POST] De: ${from} — Texto: "${text}"`)
 
       // ejemplo de palabras clave
       const palabrasClave = ['hola']
       if (palabrasClave.some(saludo => text.includes(saludo))) {
-        console.log('[Webhook POST] Detectado saludo ("hola")')
-        // Aquí podrías llamar a tu función de respuesta:
-        // await plantilla_saludo(from, 'hello_word')
+        console.log('[Webhook POST] Detectado saludo ("hola"), enviando plantilla…')
+        await sendTemplate(
+          from,
+          'saludo',   // nombre exacto de la plantilla en tu panel
+          'es_MX',    // código de idioma registrado
+          [
+            // si tu plantilla tiene botones, puedes especificar aquí:
+            // { type: 'button', sub_type: 'quick_reply', index: '0' },
+            // { type: 'button', sub_type: 'quick_reply', index: '1' }
+          ]
+        )
       } else {
         console.log('[Webhook POST] Ninguna palabra clave coincide')
       }
 
       console.log('[Webhook POST] Enviando 200 a Meta (EVENT_RECEIVED)')
-       res.sendStatus(200)
+      res.sendStatus(200)
       return
-      } catch (error) {
+    } catch (error) {
       console.error('[Webhook POST] Error procesando el mensaje:', error)
       res.sendStatus(500)
       return
