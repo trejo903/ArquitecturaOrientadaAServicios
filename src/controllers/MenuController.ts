@@ -61,9 +61,11 @@ export class MenuController {
           'saludo',   // nombre exacto de la plantilla en tu panel
           'es_MX',    // código de idioma registrado
           [
-            // si tu plantilla tiene botones, puedes especificar aquí:
-            // { type: 'button', sub_type: 'quick_reply', index: '0' },
-            // { type: 'button', sub_type: 'quick_reply', index: '1' }
+            { type: 'button', sub_type: 'quick_reply', index: '0' },
+            { type: 'button', sub_type: 'quick_reply', index: '1' },
+            { type: 'button', sub_type: 'quick_reply', index: '2' },
+            { type: 'button', sub_type: 'quick_reply', index: '3' },
+            { type: 'button', sub_type: 'quick_reply', index: '4' },
           ]
         )
       } else {
