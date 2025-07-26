@@ -20,9 +20,6 @@ router.post('/platillo',
 router.get('/platillos', MenuController.getPlatillos);
 
 
-router.post('/pedido',
-    MenuController.createPedido
-)
 
 router.put("/platillo/:id", MenuController.updatePlatillo);
 router.delete("/platillo/:id", MenuController.deletePlatillo);
