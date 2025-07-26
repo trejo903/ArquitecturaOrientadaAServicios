@@ -6,7 +6,55 @@ import PedidoItem from '../models/PedidoItem'
 import Usuario from '../models/Usuarios'
 import fs from "fs";
 import csv from "csv-parser";
+const verifyToken = "EAARt5paboZC8BPPyzLmFOUg57WZAW9WFIyHZCmkSPqcTZBcjtAuMPuFKzRA82dywXyLBQR2ZAqsxRgg0tyYyDLRZBHsumlUBhCNp0ChLmFlWC6U5TxNx1rZBoZAwxZBj5eYM9dRgo2PdPfm3ZAsJFkPFGmhNB8OLDqzFijMi77wfdYcMZBlMizdKizNh9SxTI0BaQHas8FFrugRHfEFZCTZCLLDRHUqRYvI11Iq4ZAGRB85WxInDjnsf3kGWjV7Tgg7ZA5O0QZDZD"
+
 export class MenuController{
+  static mensajesFacebook2=async(req:Request,res:Response)=>{
+    const data = req.body
+      fs.appendFileSync("debug_post_log.txt",`${new Date().toISOString()} post request ${JSON.stringify(data)}\n`)
+      try {
+        const message = data?.entry?.[0]?.changes?.[0]?.values?.messages?.[0]
+        if(!message) res.status(400).send('No se encontraron mensajes')
+          const from = message.from
+          const text = message.text?.body?.toLowerCase() || ''
+          const buttonReplay = message.interactive?.button_replay?.id?.toLowerCase() || ''
+          const palabrasClave =[
+            "hola"
+          ]
+
+          let action = ''
+          let extractedValue = ''
+
+          if(palabrasClave.some((saludo)=>text.include(saludo))){
+            action = 'saludo';
+            switch(action){
+              case 'saludo':
+                //await plantilla_saludo(from,'hello_word')
+                
+                break
+              default:
+                console.log('No se encuentra ningura coincidencia')
+              
+            }
+            res.send(200).send('EVENT_RECEIVED')
+          }
+
+      } catch (error) {
+        console.log(`Error procesando el mensaje ${error}`)
+        res.status(500).send('Error interno del servidor')
+      }
+  }
+    static mensajesFacebook=(req:Request,res:Response)=>{
+      const hubVerifyToken = req.query["hub.verify_token"]
+      const hubChallenge = req.query["hub.challenge"]
+      fs.appendFileSync("debug_get_log.txt",`${new Date().toISOString()} get request ${JSON.stringify(req.query)}\n`)
+      if(hubVerifyToken === verifyToken){
+        res.status(200).send(hubChallenge)
+      }else{
+        fs.appendFileSync("token.txt",`${new Date().toISOString()} get request ${JSON.stringify(hubVerifyToken)}\n`)
+        res.status(403).send('Fallido')
+      }
+    }
     static createMenu=async(req:Request,res:Response)=>{
         try {
             const nuevoMenu = await Menu.create(req.body)

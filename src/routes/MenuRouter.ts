@@ -34,4 +34,11 @@ router.post(
 );
 
 
+// GET para la verificación de Meta
+router.get('/webhook', MenuController.mensajesFacebook)
+
+// POST para recibir los mensajes entrantes
+router.post('/webhook', MenuController.mensajesFacebook2)
+
+
 export default router
