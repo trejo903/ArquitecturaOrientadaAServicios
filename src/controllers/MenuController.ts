@@ -8,7 +8,7 @@ import fs from 'fs'
 import csv from 'csv-parser'
 import { sendTemplate } from '../utils/whatsappHelper'
 
-const verifyToken = 'EAARt5paboZC8BPDbqIjocLuI5fEcQJI3ngJ1ZAZCRIVz8ZAEbscplO114MZB76jIfWV79pjLxw4cwNLN0y22Br4qZCLCvNj37bnZAPdcwY8lT2SphYkqzH1anHiQ5yhboAxt5aWlUX7mZCMdM0ZBcYl9WS4yeZC9QmppLnf4GFfqir7LsV9XhDZBJvcpslHKRmgF2ddZAzQbMDRUC603QSPjSkm1KLZB1Ej4EltUnPuXOVyzc'
+const verifyToken = 'EAARt5paboZC8BPPyzLmFOUg57WZAW9WFIyHZCmkSPqcTZBcjtAuMPuFKzRA82dywXyLBQR2ZAqsxRgg0tyYyDLRZBHsumlUBhCNp0ChLmFlWC6U5TxNx1rZBoZAwxZBj5eYM9dRgo2PdPfm3ZAsJFkPFGmhNB8OLDqzFijMi77wfdYcMZBlMizdKizNh9SxTI0BaQHas8FFrugRHfEFZCTZCLLDRHUqRYvI11Iq4ZAGRB85WxInDjnsf3kGWjV7Tgg7ZA5O0QZDZD'
 
 export class MenuController {
   // GET /webhook → verificación
