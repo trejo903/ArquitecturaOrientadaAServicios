@@ -18,8 +18,8 @@ export class MenuController {
   static mensajesFacebook = (req: Request, res: Response) => {
     const hubVerifyToken = req.query['hub.verify_token']
     const hubChallenge = req.query['hub.challenge']
-    if (hubVerifyToken === verifyToken) return res.status(200).send(hubChallenge as string)
-    return res.status(403).send('Fallido')
+    if (hubVerifyToken === verifyToken) res.status(200).send(hubChallenge as string)
+    res.status(403).send('Fallido')
   }
 
   // POST /webhook → conversación
@@ -28,7 +28,7 @@ export class MenuController {
     fs.appendFileSync('debug_post_log.txt', `${new Date().toISOString()} ${JSON.stringify(data)}\n`)
 
     const message = data?.entry?.[0]?.changes?.[0]?.value?.messages?.[0]
-    if (!message) return res.sendStatus(200)
+    if (!message) res.sendStatus(200)
 
     const from = message.from!
     const text = message.text?.body?.trim().toLowerCase() || ''
@@ -89,7 +89,7 @@ export class MenuController {
       sessions.delete(from)
     }
 
-    return res.sendStatus(200)
+    res.sendStatus(200)
   }
 
 
