@@ -1,93 +1,96 @@
-import type { Request, Response } from 'express'
+import { Request, Response } from 'express'
+import fs from 'fs'
 import Menu from '../models/Menu'
 import Platillos from '../models/Platillos'
 import Pedido from '../models/Pedido'
 import PedidoItem from '../models/PedidoItem'
 import Usuario from '../models/Usuarios'
-import fs from 'fs'
-import csv from 'csv-parser'
-import { sendTemplate } from '../utils/whatsappHelper'
+import { sendText, sendList } from '../utils/whatsappHelper'
+
+
+interface Session { paso: string; data: any }
+const sessions = new Map<string, Session>()
 
 const verifyToken = 'EAARt5paboZC8BPDbqIjocLuI5fEcQJI3ngJ1ZAZCRIVz8ZAEbscplO114MZB76jIfWV79pjLxw4cwNLN0y22Br4qZCLCvNj37bnZAPdcwY8lT2SphYkqzH1anHiQ5yhboAxt5aWlUX7mZCMdM0ZBcYl9WS4yeZC9QmppLnf4GFfqir7LsV9XhDZBJvcpslHKRmgF2ddZAzQbMDRUC603QSPjSkm1KLZB1Ej4EltUnPuXOVyzc'
 
 export class MenuController {
-  // GET /webhook → verificación
- static mensajesFacebook = (req: Request, res: Response) => {
-    console.log('[Webhook GET] Entrando a mensajesFacebook', req.query)
+   // GET /webhook → verificación
+  static mensajesFacebook = (req: Request, res: Response) => {
     const hubVerifyToken = req.query['hub.verify_token']
     const hubChallenge = req.query['hub.challenge']
-
-    if (hubVerifyToken === verifyToken) {
-      console.log('[Webhook GET] Token verificado correctamente:', hubVerifyToken)
-      res.status(200).send(hubChallenge as string)
-      return
-    } else {
-      console.log('[Webhook GET] Token inválido:', hubVerifyToken)
-      res.status(403).send('Fallido')
-      return
-    }
+    if (hubVerifyToken === verifyToken) return res.status(200).send(hubChallenge as string)
+    return res.status(403).send('Fallido')
   }
 
+  // POST /webhook → conversación
   static mensajesFacebook2 = async (req: Request, res: Response) => {
-    console.log('[Webhook POST] Entrando a mensajesFacebook2')
     const data = req.body
-    fs.appendFileSync(
-      'debug_post_log.txt',
-      `${new Date().toISOString()} POST /webhook ${JSON.stringify(data)}\n`
-    )
-    console.log('[Webhook POST] Payload recibido:', JSON.stringify(data))
+    fs.appendFileSync('debug_post_log.txt', `${new Date().toISOString()} ${JSON.stringify(data)}\n`)
+
+    const message = data?.entry?.[0]?.changes?.[0]?.value?.messages?.[0]
+    if (!message) return res.sendStatus(200)
+
+    const from = message.from!
+    const text = message.text?.body?.trim().toLowerCase() || ''
+
+    // Iniciar o recuperar sesión
+    let session = sessions.get(from)
+    if (!session) {
+      session = { paso: 'inicio', data: { items: [] } }
+      sessions.set(from, session)
+    }
 
     try {
-      // Es "value", no "values"
-      const message = data?.entry?.[0]?.changes?.[0]?.value?.messages?.[0]
-      if (!message) {
-        console.log('[Webhook POST] No se encontró mensaje en el payload')
-        res.status(400).send('No se encontraron mensajes')
-        return
+      switch (session.paso) {
+        case 'inicio':
+          await sendText(from, "¡Hola! Bienvenido a Restaurante.\nElige: 1) Entradas  2) Tacos  3) Bebidas")
+          session.paso = 'esperando_categoria'
+          break
+
+        case 'esperando_categoria':
+          const cat = parseInt(text)
+          if (![1,2,3].includes(cat)) {
+            await sendText(from, 'Escribe 1, 2 o 3.')
+            break
+          }
+          session.data.categoria = cat
+          await sendText(from, `Categoría ${cat}. ¿Cuántas unidades?`)
+          session.paso = 'esperando_cantidad'
+          break
+
+        case 'esperando_cantidad':
+          const qty = parseInt(text)
+          if (!qty || qty < 1) {
+            await sendText(from, 'Número inválido.')
+            break
+          }
+          session.data.items.push({ categoria: session.data.categoria, cantidad: qty })
+          await sendText(from, `Agregaste ${qty} x categoría ${session.data.categoria}.\n¿Confirmas? (sí/no)`)
+          session.paso = 'confirmar'
+          break
+
+        case 'confirmar':
+          if (text.startsWith('s')) {
+            const response = await Pedido.create({
+              usuarioId: (await Usuario.findOrCreate({ where: { telefono: from } }))[0].id,
+              total: 0
+            })
+            // Aquí insertar lógica de PedidoItem y actualizar total...
+            await sendText(from, `✅ Pedido registrado con ID ${response.id}`)
+          } else {
+            await sendText(from, 'Pedido cancelado. Escribe "hola" para reiniciar.')
+          }
+          sessions.delete(from)
+          break
       }
-      console.log('[Webhook POST] Mensaje parseado:', message)
-
-      const from = message.from      // e.g. "5216121234567"
-      const text = message.text?.body?.toLowerCase() || ''
-      console.log(`[Webhook POST] De: ${from} — Texto: "${text}"`)
-
-      // Detectar saludo
-      if (text.includes('hola')) {
-        console.log('[Webhook POST] Detectado saludo ("hola"), enviando plantilla…')
-        try {
-          await sendTemplate(
-            from,
-            'saludo',   // nombre exacto de la plantilla
-            'es_MX',    // código de idioma
-            [
-              // Ajusta la cantidad de índices a los botones que definiste en tu plantilla
-              { type: 'button', sub_type: 'quick_reply', index: '0' },
-              { type: 'button', sub_type: 'quick_reply', index: '1' }
-            ]
-          )
-          console.log('[Webhook POST] Plantilla enviada correctamente')
-        } catch (err: any) {
-          console.error(
-            '[Webhook POST] Error enviando plantilla:',
-            err.response?.status,
-            JSON.stringify(err.response?.data, null, 2)
-          )
-        }
-      } else {
-        console.log('[Webhook POST] Ninguna palabra clave coincide')
-      }
-
-      console.log('[Webhook POST] Enviando 200 a Meta (EVENT_RECEIVED)')
-      res.sendStatus(200)
-      return
-    } catch (error) {
-      console.error('[Webhook POST] Error procesando el mensaje:', error)
-      res.sendStatus(500)
-      return
+    } catch (err) {
+      console.error('Error flujo WA:', err)
+      await sendText(from, 'Lo siento, ocurrió un error. Intenta más tarde.')
+      sessions.delete(from)
     }
+
+    return res.sendStatus(200)
   }
-
-
 
 
 
@@ -212,7 +215,6 @@ export class MenuController {
 
       const results: any[] = []
       fs.createReadStream(file.path)
-        .pipe(csv())
         .on('data', (row) => {
           results.push(row)
         })
