@@ -6,6 +6,8 @@ const HEADERS = {
   Authorization: `Bearer EAARt5paboZC8BPNhbqZCHIPrZAIItzL4FEyEAXYL0x8R0aEOoD8G7i8tLs5YBrUz6O1iGM0vmw10cUuhYQu0SlAFE5xAPNsmoda8fmkHapO8yFZA4JqNUrSts0UDyBNCDd9yWZAUfJOKFAnwtfAUCSkJllgmZCqRgLS5x3jUGfnlZBZCM4gdjDRPv7VLJ88smCuLHdAGtK7ukTBl1uXzKt8P1ExvSFxCwMJ9gruw0dufCpaO3ipTxXr3zSkvl37ylAZDZD`,
 }
 
+//prueba
+
 export async function sendText(to: string, text: string) {
   const payload = {
     messaging_product: 'whatsapp',
