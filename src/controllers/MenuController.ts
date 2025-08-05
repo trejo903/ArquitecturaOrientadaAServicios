@@ -16,7 +16,7 @@ interface SessionData {
 
 const sessions = new Map<string, SessionData>()
 
-const verifyToken = 'EAARt5paboZC8BPNhbqZCHIPrZAIItzL4FEyEAXYL0x8R0aEOoD8G7i8tLs5YBrUz6O1iGM0vmw10cUuhYQu0SlAFE5xAPNsmoda8fmkHapO8yFZA4JqNUrSts0UDyBNCDd9yWZAUfJOKFAnwtfAUCSkJllgmZCqRgLS5x3jUGfnlZBZCM4gdjDRPv7VLJ88smCuLHdAGtK7ukTBl1uXzKt8P1ExvSFxCwMJ9gruw0dufCpaO3ipTxXr3zSkvl37ylAZDZD' // Cambia por el que configuraste en el dashboard de Meta
+const verifyToken = 'EAARt5paboZC8BPCxZASRU1ZBVjUZBQHm040zQw11roWGZB5yCzlmUBV8uyN7VRPuTkIpcpKqAuBlkYNlMEVJnHwdyRPVCJdxvBTuh9lOgPnTBBb1ZBx4aAZBLWCD9FG2o4hWTjz5tLHkMsN2S3i35O23ZBVXi0DghLs936hVD8Xgfe6BYmj5Fqnzx7pGs7RWed2u8TNnoYoq2tQIpZBLeZAZATLbNsLwOG9flSbK6B8KlB4ZBk9D7QliWZBEZCY93ch9OZBCgZDZD' // Cambia por el que configuraste en el dashboard de Meta
 
 export class MenuController {
   // GET para la verificación del webhook de Meta (obligatorio)
