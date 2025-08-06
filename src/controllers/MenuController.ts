@@ -16,10 +16,10 @@ interface SessionData {
 
 const sessions = new Map<string, SessionData>()
 
-const verifyToken = 'EAARt5paboZC8BPEYfuUn82oKM73gsZBl9smvuKWyjmPGRapCR64bZAaSmaKnqi6qCz8n9WZAe9aGR1yeb6dCQYnPrZCngaBwlYIajwyGKLl6ltRKJFVmwB0vcEZAqNOLr5JtqjxIHfnvnH0LQ7qN4C9oPGhmWnH3wrZAxPmHZBzZCOd6KZCmwRI6xCq3X6Ib6ijE5Xk7qbl6a86prRlhMZB1vePiLKxxu0ZBuoqbcFVenQnZAFgrnw2Y4ybxiazfltty2mAZDZD' // Cambia por el que configuraste en el dashboard de Meta
+const verifyToken = 'EAARt5paboZC8BPEYfuUn82oKM73gsZBl9smvuKWyjmPGRapCR64bZAaSmaKnqi6qCz8n9WZAe9aGR1yeb6dCQYnPrZCngaBwlYIajwyGKLl6ltRKJFVmwB0vcEZAqNOLr5JtqjxIHfnvnH0LQ7qN4C9oPGhmWnH3wrZAxPmHZBzZCOd6KZCmwRI6xCq3X6Ib6ijE5Xk7qbl6a86prRlhMZB1vePiLKxxu0ZBuoqbcFVenQnZAFgrnw2Y4ybxiazfltty2mAZDZD' // Cambia por el de tu app de Meta
 
 export class MenuController {
-  // GET para la verificación del webhook de Meta (obligatorio)
+  // GET para la verificación del webhook de Meta (OBLIGATORIO)
   static mensajesFacebook = (req: Request, res: Response) => {
     const hubVerifyToken = req.query['hub.verify_token']
     const hubChallenge = req.query['hub.challenge']
@@ -126,8 +126,20 @@ export class MenuController {
         }
         case 'agregar_mas': {
           if (text.startsWith('s')) {
+            // Cambia a "categoria" y muestra la lista de inmediato
             session.paso = 'categoria'
-            await sendText(from, 'Ok, agrega otro platillo.')
+            // Mostrar categorías inmediatamente
+            const menus = await Menu.findAll()
+            if (menus.length === 0) {
+              await sendText(from, 'No hay categorías registradas.')
+              break
+            }
+            let menuList = 'Elige una categoría:\n'
+            menus.forEach((m, i) => {
+              menuList += `${i + 1}) ${m.nombre}\n`
+            })
+            await sendText(from, menuList.trim())
+            session.paso = 'esperando_categoria'
           } else {
             // Mostrar resumen y pedir confirmación
             let resumen = 'Tu pedido:\n'
