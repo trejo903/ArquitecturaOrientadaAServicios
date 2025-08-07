@@ -1,189 +1,207 @@
 import { Request, Response } from 'express'
-import fs from 'fs'
-import Menu from '../models/Menu'
-import Platillos from '../models/Platillos'
-import Pedido from '../models/Pedido'
-import PedidoItem from '../models/PedidoItem'
-import Usuario from '../models/Usuarios'
-import { sendText } from '../utils/whatsappHelper'
+import Menu         from '../models/Menu'
+import Platillos    from '../models/Platillos'
+import Pedido       from '../models/Pedido'
+import PedidoItem   from '../models/PedidoItem'
+import Usuario      from '../models/Usuarios'
+import { sendText, sendButtons, sendList } from '../utils/whatsappHelper'
 
 interface SessionData {
   paso: string
-  items: { platilloId: number, nombre: string, precio: number, cantidad: number }[]
+  items: { platilloId: number; nombre: string; precio: number; cantidad: number }[]
   categoriaId?: number
-  platilloId?: number
 }
 
 const sessions = new Map<string, SessionData>()
-
-const verifyToken = 'EAARt5paboZC8BPDbqIjocLuI5fEcQJI3ngJ1ZAZCRIVz8ZAEbscplO114MZB76jIfWV79pjLxw4cwNLN0y22Br4qZCLCvNj37bnZAPdcwY8lT2SphYkqzH1anHiQ5yhboAxt5aWlUX7mZCMdM0ZBcYl9WS4yeZC9QmppLnf4GFfqir7LsV9XhDZBJvcpslHKRmgF2ddZAzQbMDRUC603QSPjSkm1KLZB1Ej4EltUnPuXOVyzc' // Cambia por el de tu app de Meta
+const verifyToken = 'EAARt5paboZC8BPDbqIjocLuI5fEcQJI3ngJ1ZAZCRIVz8ZAEbscplO114MZB76jIfWV79pjLxw4cwNLN0y22Br4qZCLCvNj37bnZAPdcwY8lT2SphYkqzH1anHiQ5yhboAxt5aWlUX7mZCMdM0ZBcYl9WS4yeZC9QmppLnf4GFfqir7LsV9XhDZBJvcpslHKRmgF2ddZAzQbMDRUC603QSPjSkm1KLZB1Ej4EltUnPuXOVyzc'
 
 export class MenuController {
-  // GET para la verificación del webhook de Meta (OBLIGATORIO)
-  static mensajesFacebook = (req: Request, res: Response) => {
-    const hubVerifyToken = req.query['hub.verify_token']
-    const hubChallenge = req.query['hub.challenge']
-    if (hubVerifyToken === verifyToken) {
-      res.status(200).send(hubChallenge as string)
-      return
-    }
-    res.status(403).send('Token de verificación incorrecto')
-    return
+  /** GET /webhook */
+  static verify = (req: Request, res: Response) => {
+    const token = req.query['hub.verify_token']
+    const challenge = req.query['hub.challenge']
+    if (token === verifyToken) res.status(200).send(challenge as string)
+    res.status(403).send('❌ Token inválido')
   }
 
-  // POST para recibir mensajes de WhatsApp (flujo conversacional)
-  static mensajesFacebook2 = async (req: Request, res: Response) => {
-    const data = req.body
-    const message = data?.entry?.[0]?.changes?.[0]?.value?.messages?.[0]
-    if (!message) {
-      res.sendStatus(200)
-      return
-    }
+  /** POST /webhook */
+  static webhook = async (req: Request, res: Response) => {
+    const entry   = req.body.entry?.[0]
+    const change  = entry?.changes?.[0]
+    const message = change?.value?.messages?.[0]
+    if (!message) res.sendStatus(200)
 
     const from = message.from!
     const text = (message.text?.body || '').trim().toLowerCase()
 
-    // Iniciar sesión de usuario
+    // iniciar o recuperar sesión
     let session = sessions.get(from)
     if (!session) {
-      session = { paso: 'categoria', items: [] }
+      session = { paso: 'menu_inicio', items: [] }
       sessions.set(from, session)
     }
 
     try {
       switch (session.paso) {
-        case 'categoria': {
-          const menus = await Menu.findAll()
-          if (menus.length === 0) {
-            await sendText(from, 'No hay categorías registradas.')
-            break
-          }
-          let menuList = 'Elige una categoría:\n'
-          menus.forEach((m, i) => {
-            menuList += `${i + 1}) ${m.nombre}\n`
-          })
-          await sendText(from, menuList.trim())
-          session.paso = 'esperando_categoria'
+        // --- MENÚ INICIAL con botones ---
+        case 'menu_inicio':
+          await sendText(from,
+            '*🍽️ ¡Bienvenido a Restaurante X!*_\n' +
+            '_¿Qué deseas hacer hoy?_\n\n' +
+            'Usa los botones debajo ⬇️')
+          await sendButtons(from, 'Elige una opción:',
+            [
+              { id: 'opt_menu',    title: '📋 Ver Menú'    },
+              { id: 'opt_ofertas', title: '✨ Ofertas Día' },
+              { id: 'opt_salir',   title: '🚪 Salir'       }
+            ])
+          session.paso = 'menu_seleccion'
           break
-        }
-        case 'esperando_categoria': {
-          const menus = await Menu.findAll()
-          const num = parseInt(text)
-          if (isNaN(num) || num < 1 || num > menus.length) {
-            await sendText(from, `Escribe un número entre 1 y ${menus.length}`)
-            break
-          }
-          const categoria = menus[num - 1]
-          session.categoriaId = categoria.id
-          const platillos = await Platillos.findAll({ where: { menuId: categoria.id } })
-          if (platillos.length === 0) {
-            await sendText(from, `No hay platillos para la categoría ${categoria.nombre}. Elige otra.`)
-            session.paso = 'categoria'
-            break
-          }
-          let plList = `Selecciona un platillo de ${categoria.nombre}:\n`
-          platillos.forEach((p, i) => {
-            plList += `${i + 1}) ${p.platillo} $${p.precio}\n`
-          })
-          await sendText(from, plList.trim())
-          session.paso = 'esperando_platillo'
-          break
-        }
-        case 'esperando_platillo': {
-          const platillos = await Platillos.findAll({ where: { menuId: session.categoriaId } })
-          const num = parseInt(text)
-          if (isNaN(num) || num < 1 || num > platillos.length) {
-            await sendText(from, `Elige un número entre 1 y ${platillos.length}`)
-            break
-          }
-          const plat = platillos[num - 1]
-          session.platilloId = plat.id
-          await sendText(from, `¿Cuántas unidades de "${plat.platillo}" deseas?`)
-          session.paso = 'esperando_cantidad'
-          break
-        }
-        case 'esperando_cantidad': {
-          const qty = parseInt(text)
-          if (isNaN(qty) || qty < 1) {
-            await sendText(from, 'Ingresa una cantidad válida.')
-            break
-          }
-          const plat = await Platillos.findByPk(session.platilloId!)
-          if (!plat) {
-            await sendText(from, 'No se encontró el platillo seleccionado. Reinicia con "hola".')
-            sessions.delete(from)
-            break
-          }
-          session.items.push({
-            platilloId: plat.id,
-            nombre: plat.platillo,
-            precio: plat.precio,
-            cantidad: qty
-          })
-          await sendText(from, `Agregado: ${qty} x ${plat.platillo}\n¿Quieres agregar otro platillo? (sí/no)`)
-          session.paso = 'agregar_mas'
-          break
-        }
-        case 'agregar_mas': {
-          if (text.startsWith('s')) {
-            // Cambia a "categoria" y muestra la lista de inmediato
-            session.paso = 'categoria'
-            // Mostrar categorías inmediatamente
-            const menus = await Menu.findAll()
-            if (menus.length === 0) {
-              await sendText(from, 'No hay categorías registradas.')
+
+        // botón presionado
+        case 'menu_seleccion':
+          if (message.interactive?.button_reply) {
+            const btn = message.interactive.button_reply.id
+            if (btn === 'opt_menu') {
+              session.paso = 'listar_categorias'
+            }
+            else if (btn === 'opt_ofertas') {
+              // aquí puedes llamar a tu endpoint de ofertas
+              await sendText(from, '🌟 ¡Estas son nuestras ofertas de hoy! ...')
+              session.paso = 'menu_inicio'
+            }
+            else {
+              await sendText(from, '👋 ¡Hasta luego!')
+              sessions.delete(from)
               break
             }
-            let menuList = 'Elige una categoría:\n'
-            menus.forEach((m, i) => {
-              menuList += `${i + 1}) ${m.nombre}\n`
-            })
-            await sendText(from, menuList.trim())
-            session.paso = 'esperando_categoria'
           } else {
-            // Mostrar resumen y pedir confirmación
-            let resumen = 'Tu pedido:\n'
-            let total = 0
-            session.items.forEach(i => {
-              resumen += `- ${i.cantidad} x ${i.nombre} ($${i.precio * i.cantidad})\n`
-              total += i.precio * i.cantidad
-            })
-            resumen += `Total: $${total}\n¿Confirmas tu pedido? (sí/no)`
-            await sendText(from, resumen.trim())
-            session.paso = 'confirmar'
+            await sendText(from, 'Por favor usa los botones ⬇️')
           }
           break
-        }
-        case 'confirmar': {
-          if (text.startsWith('s')) {
-            // Guardar usuario y pedido
-            const [usuario] = await Usuario.findOrCreate({ where: { telefono: from } })
-            const total = session.items.reduce((acc, i) => acc + (i.precio * i.cantidad), 0)
-            const nuevoPedido = await Pedido.create({
-              usuarioId: usuario.id,
-              total
+
+        // LISTAR CATEGORÍAS como LISTA INTERACTIVA
+        case 'listar_categorias':
+          {
+            const categorias = await Menu.findAll()
+            const sections = [{
+              title: 'Categorías',
+              rows: categorias.map((c,i) => ({
+                id: `${c.id}`,
+                title: c.nombre,
+                description: ''
+              }))
+            }]
+            await sendList(from,
+              '📚 Nuestras categorías',
+              'Selecciona con un solo tap:',
+              'Puedes regresar al inicio en cualquier momento',
+              sections)
+            session.paso = 'escoger_categoria'
+          }
+          break
+
+        // coger la categoría taponada
+        case 'escoger_categoria':
+          if (message.interactive?.list_reply) {
+            const catId = Number(message.interactive.list_reply.id)
+            session.categoriaId = catId
+            session.paso = 'listar_platillos'
+          } else {
+            await sendText(from, '☝️ Toca uno de los elementos de la lista.')
+          }
+          break
+
+        // listar platillos de esa categoría
+        case 'listar_platillos':
+          {
+            const platillos = await Platillos.findAll({ where: { menuId: session.categoriaId }})
+            let txt = `*🍽️ Platillos disponibles:*\n`
+            platillos.forEach((p,i) => {
+              txt += `\n${i+1}) *${p.platillo}* — $${p.precio}`
             })
-            for (const i of session.items) {
-              await PedidoItem.create({
-                pedidoId: nuevoPedido.id,
-                platilloId: i.platilloId,
-                cantidad: i.cantidad
-              })
+            txt += `\n\n_Envía el número para elegirlo_`
+            await sendText(from, txt)
+            session.paso = 'esperando_num_platillo'
+          }
+          break
+
+        // usuario escribe “1”, “2”, …
+        case 'esperando_num_platillo':
+          {
+            const idx = parseInt(text) - 1
+            const lista = await Platillos.findAll({ where: { menuId: session.categoriaId }})
+            if (idx < 0 || idx >= lista.length) {
+              await sendText(from, '❗ Elige un número válido.')
+              break
             }
-            await sendText(from, `✅ ¡Pedido registrado! Tu número de pedido es ${nuevoPedido.id}. Gracias.`)
-            sessions.delete(from)
-          } else {
-            await sendText(from, 'Pedido cancelado. Escribe "hola" para reiniciar.')
-            sessions.delete(from)
+            session.items.push({
+              platilloId: lista[idx].id,
+              nombre: lista[idx].platillo,
+              precio: lista[idx].precio,
+              cantidad: 1
+            })
+            await sendText(from,
+              `✅ *Agregado:* 1 x *${lista[idx].platillo}* — $${lista[idx].precio}\n` +
+              `_¿Agregar más?_ (sí / no)`)
+            session.paso = 'preguntar_mas'
           }
           break
-        }
+
+        // decidir si agrega más
+        case 'preguntar_mas':
+          if (text.startsWith('s')) {
+            session.paso = 'listar_categorias'  // vuelve al inicio lista categorías
+          } else {
+            // confirma y crea pedido
+            let sum = 0
+            let resumen = '*🧾 Resumen de tu pedido:*\n\n'
+            session.items.forEach(i => {
+              const sub = i.precio * i.cantidad
+              resumen += `- ${i.cantidad} x ${i.nombre} — $${sub}\n`
+              sum += sub
+            })
+            resumen += `\n*Total:* $${sum}`
+            await sendText(from, resumen)
+            await sendButtons(from, '¿Confirmas tu pedido?', [
+              { id: 'confirm', title: '✔️ Sí, confirmar' },
+              { id: 'cancel',  title: '❌ Cancelar'   }
+            ])
+            session.paso = 'finalizar'
+          }
+          break
+
+        // confirmar o cancelar
+        case 'finalizar':
+          if (message.interactive?.button_reply) {
+            if (message.interactive.button_reply.id === 'confirm') {
+              const [u] = await Usuario.findOrCreate({ where: { telefono: from }})
+              const pedido = await Pedido.create({
+                usuarioId: u.id,
+                total: session.items.reduce((a,i)=>a+i.precio*i.cantidad,0)
+              })
+              for (const it of session.items) {
+                await PedidoItem.create({
+                  pedidoId: pedido.id,
+                  platilloId: it.platilloId,
+                  cantidad: it.cantidad
+                })
+              }
+              await sendText(from, `🎉 ¡Listo! Tu pedido #${pedido.id} está en camino.`)
+            } else {
+              await sendText(from, '❌ Pedido cancelado. Escribe “hola” para empezar de nuevo.')
+            }
+          }
+          sessions.delete(from)
+          break
       }
-    } catch (err) {
-      console.error('Error flujo WA:', err)
-      await sendText(from, 'Ocurrió un error. Intenta más tarde.')
+    }
+    catch(err){
+      console.error('Flow error:', err)
+      await sendText(from, '⚠️ Algo salió mal, intenta más tarde.')
       sessions.delete(from)
     }
+
     res.sendStatus(200)
   }
 }

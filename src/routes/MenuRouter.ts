@@ -9,10 +9,10 @@ const router = Router()
 
 
 // GET para la verificación de Meta
-router.get('/webhook', MenuController.mensajesFacebook)
+router.get('/webhook', MenuController.verify)
 
 // POST para recibir los mensajes entrantes
-router.post('/webhook', MenuController.mensajesFacebook2)
+router.post('/webhook', MenuController.webhook)
 
 
 export default router
