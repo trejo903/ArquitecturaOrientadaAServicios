@@ -40,7 +40,7 @@ export class MenuController {
       return
     }
 
-    const from    = msg.from!
+    const from    = '526182113919'
     const textRaw = msg.text?.body?.trim() || ''
     const text    = textRaw.toLowerCase()
 
