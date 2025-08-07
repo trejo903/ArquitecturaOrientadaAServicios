@@ -27,7 +27,7 @@ const sessions = new Map<string, Session>()
 const VERIFY_TOKEN = 'EAARt5paboZC8BPDbqIjocLuI5fEcQJI3ngJ1ZAZCRIVz8ZAEbscplO114MZB76jIfWV79pjLxw4cwNLN0y22Br4qZCLCvNj37bnZAPdcwY8lT2SphYkqzH1anHiQ5yhboAxt5aWlUX7mZCMdM0ZBcYl9WS4yeZC9QmppLnf4GFfqir7LsV9XhDZBJvcpslHKRmgF2ddZAzQbMDRUC603QSPjSkm1KLZB1Ej4EltUnPuXOVyzc'
 
 export class MenuController {
-  // GET /webhook → verificación
+  // GET /webhook → verificación de Meta
   static verify = (req: Request, res: Response) => {
     const token     = req.query['hub.verify_token']
     const challenge = req.query['hub.challenge'] as string
@@ -55,7 +55,7 @@ export class MenuController {
     // Log del chat
     fs.appendFileSync('wa_debug.log', `${new Date().toISOString()} ${from}: ${raw}\n`)
 
-    // iniciar/recuperar sesión
+    // iniciar o recuperar sesión
     let session = sessions.get(from)
     if (!session) {
       session = { step: 'WELCOME', items: [] }
