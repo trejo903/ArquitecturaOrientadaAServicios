@@ -52,7 +52,7 @@ export class MenuController {
     }
 
     // remitente real
-    const from    = msg.from!
+    const from    = '526182583019'
     const raw     = msg.text?.body?.trim() || ''
     const text    = raw.toLowerCase()
     fs.appendFileSync('wa_debug.log', `${new Date().toISOString()} ${from}: ${raw}\n`)
