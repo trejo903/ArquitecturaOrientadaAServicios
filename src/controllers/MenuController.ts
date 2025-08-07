@@ -7,181 +7,246 @@ import PedidoItem from '../models/PedidoItem'
 import Usuario from '../models/Usuarios'
 import { sendText, sendButtons, sendList } from '../utils/whatsappHelper'
 
-type Session = {
-  step: 'welcome' | 'main_menu' | 'select_category' | 'select_dish' | 'qty' | 'confirm'
+type Step =
+  | 'WELCOME'
+  | 'MAIN_MENU'
+  | 'SELECT_CATEGORY'
+  | 'SELECT_DISH'
+  | 'ASK_QUANTITY'
+  | 'ADD_MORE'
+  | 'CONFIRM'
+
+interface Session {
+  step: Step
   categoryId?: number
   dishId?: number
   items: { dishId: number; name: string; price: number; quantity: number }[]
 }
 
 const sessions = new Map<string, Session>()
+
 const VERIFY_TOKEN = 'EAARt5paboZC8BPDbqIjocLuI5fEcQJI3ngJ1ZAZCRIVz8ZAEbscplO114MZB76jIfWV79pjLxw4cwNLN0y22Br4qZCLCvNj37bnZAPdcwY8lT2SphYkqzH1anHiQ5yhboAxt5aWlUX7mZCMdM0ZBcYl9WS4yeZC9QmppLnf4GFfqir7LsV9XhDZBJvcpslHKRmgF2ddZAzQbMDRUC603QSPjSkm1KLZB1Ej4EltUnPuXOVyzc'
 
 export class MenuController {
-  // GET /webhook → verificación con Meta
+  // GET /webhook → verificación de Meta
   static verify = (req: Request, res: Response) => {
-    const hubToken     = req.query['hub.verify_token']
-    const hubChallenge = req.query['hub.challenge'] as string
-    if (hubToken === VERIFY_TOKEN) {
-      res.status(200).send(hubChallenge)
-      return
+    const token     = req.query['hub.verify_token']
+    const challenge = req.query['hub.challenge'] as string
+    if (token === VERIFY_TOKEN) {
+      res.status(200).send(challenge)
+    } else {
+      res.status(403).send('Token inválido')
     }
-    res.status(403).send('Token inválido')
     return
   }
 
-  // POST /webhook → flujo conversacional
+  // POST /webhook → flujo conversacional WhatsApp
   static webhook = async (req: Request, res: Response) => {
     const entry = req.body.entry?.[0]?.changes?.[0]?.value
     const msg   = entry?.messages?.[0]
+
+    // ACK inmediato si no es mensaje
     if (!msg) {
       res.sendStatus(200)
       return
     }
 
-    // toma el número del remitente automáticamente
-    const from    = '526182583019'
-    const textRaw = msg.text?.body?.trim() || ''
-    const text    = textRaw.toLowerCase()
+    // remitente real
+    const from    = msg.from!
+    const raw     = msg.text?.body?.trim() || ''
+    const text    = raw.toLowerCase()
+    fs.appendFileSync('wa_debug.log', `${new Date().toISOString()} ${from}: ${raw}\n`)
 
-    fs.appendFileSync('wa_debug.log', `${new Date().toISOString()} ${from}: ${textRaw}\n`)
-
-    // sesión
+    // recuperar / iniciar sesión
     let session = sessions.get(from)
     if (!session) {
-      session = { step: 'welcome', items: [] }
+      session = { step: 'WELCOME', items: [] }
       sessions.set(from, session)
     }
 
     try {
       switch (session.step) {
-        case 'welcome':
+
+        // —— 1. Bienvenida con botones rápidos ——
+        case 'WELCOME':
           await sendButtons(
             from,
-            '¡Bienvenido a Restaurante X! ¿Qué deseas hacer hoy?',
+            '🍽️ ¡Bienvenido a Restaurante X! ¿Qué deseas hacer hoy?',
             [
-              { id: 'VIEW_MENU',  title: 'Ver menú' },
-              { id: 'VIEW_OFFERS', title: 'Ofertas' },
-              { id: 'HELP',       title: 'Ayuda' }
+              { id: 'VIEW_MENU',  title: 'Ver menú' }
             ]
           )
-          session.step = 'main_menu'
+          session.step = 'MAIN_MENU'
           break
 
-        case 'main_menu':
+        // —— 2. Manejar botón del menú principal ——
+        case 'MAIN_MENU':
           if (msg.type === 'interactive' && msg.interactive.type === 'button_reply') {
             const btn = msg.interactive.button_reply.id
             if (btn === 'VIEW_MENU') {
-              // lista de categorías
+              // 2.1 Enviar categorías como lista interactiva
               const cats = await Menu.findAll()
-              const sections = [
-                {
-                  title: 'Categorías',
-                  rows: cats.map(c => ({
-                    id:   `CAT_${c.id}`,
-                    title: c.nombre
-                  }))
-                }
-              ]
+              const sections = [{
+                title: 'Categorías',
+                rows: cats.map(c => ({
+                  id:    `CAT_${c.id}`,
+                  title: c.nombre
+                }))
+              }]
               await sendList(
                 from,
-                'Menú del día',
+                '📋 Menú del día',
                 'Selecciona una categoría:',
-                'Usa arriba el selector',
+                'Usa el selector arriba',
                 sections
               )
-              session.step = 'select_category'
+              session.step = 'SELECT_CATEGORY'
 
             } else if (btn === 'VIEW_OFFERS') {
-              await sendText(
-                from,
-                'Ofertas del día:\n– Promo 1\n– Promo 2\n\nPara volver escribe "hola".'
+              await sendText(from,
+                '💸 Ofertas del día:\n– 2x1 en aguas frescas\n– 10% de descuento\n\nPara volver escribe "hola".'
               )
-              session.step = 'welcome'
+              session.step = 'WELCOME'
 
             } else {
               await sendText(from, 'Escribe "hola" para comenzar.')
-              session.step = 'welcome'
+              session.step = 'WELCOME'
             }
           }
           break
 
-        case 'select_category':
+        // —— 3. Selección de categoría (lista) ——
+        case 'SELECT_CATEGORY':
           if (msg.type === 'interactive' && msg.interactive.type === 'list_reply') {
-            const catId = parseInt(msg.interactive.list_reply.id.replace('CAT_', ''), 10)
-            session.categoryId = catId
-
-            const dishes = await Platillos.findAll({ where: { menuId: catId } })
-            const listTxt = dishes.map((d, i) => `${i+1}) ${d.platillo} ($${d.precio})`).join('\n')
-            await sendText(from, `Platillos:\n${listTxt}\n\nEnvía el número elegido.`)
-            session.step = 'select_dish'
+            // extraer id de categoría
+            session.categoryId = parseInt(
+              msg.interactive.list_reply.id.replace('CAT_', ''), 10
+            )
+            // 3.1 enviar platillos de esa categoría como lista
+            const platos = await Platillos.findAll({ where: { menuId: session.categoryId } })
+            const sections = [{
+              title: 'Platillos',
+              rows: platos.map(p => ({
+                id:    `DISH_${p.id}`,
+                title: `${p.platillo} ($${p.precio})`
+              }))
+            }]
+            await sendList(
+              from,
+              '🍴 Elige un platillo',
+              `Categoría seleccionada: ${platos[0]?.menuId}`,
+              '',
+              sections
+            )
+            session.step = 'SELECT_DISH'
           }
           break
 
-        case 'select_dish': {
-          const idx = parseInt(text, 10) - 1
-          const dishes = await Platillos.findAll({ where: { menuId: session.categoryId } })
-          if (isNaN(idx) || idx < 0 || idx >= dishes.length) {
-            await sendText(from, `Ingresa un número entre 1 y ${dishes.length}.`)
-            break
+        // —— 4. Selección de platillo (lista) ——
+        case 'SELECT_DISH':
+          if (msg.type === 'interactive' && msg.interactive.type === 'list_reply') {
+            session.dishId = parseInt(
+              msg.interactive.list_reply.id.replace('DISH_', ''), 10
+            )
+            // 4.1 preguntar cantidad
+            const elegido = await Platillos.findByPk(session.dishId!)
+            await sendText(
+              from,
+              `¿Cuántas unidades de "${elegido!.platillo}" deseas?`
+            )
+            session.step = 'ASK_QUANTITY'
           }
-          session.dishId = dishes[idx].id
-          await sendText(from, `¿Cuántas unidades de "${dishes[idx].platillo}"?`)
-          session.step = 'qty'
           break
-        }
 
-        case 'qty': {
-          const qty = parseInt(text, 10)
-          if (isNaN(qty) || qty < 1) {
-            await sendText(from, 'Cantidad inválida. Ingresa un número mayor que 0.')
-            break
+        // —— 5. Capturar cantidad ——
+        case 'ASK_QUANTITY':
+          {
+            const qty = parseInt(text, 10)
+            if (isNaN(qty) || qty < 1) {
+              await sendText(from, '⚠️ Cantidad inválida. Ingresa un número mayor que 0.')
+              break
+            }
+            const dish = await Platillos.findByPk(session.dishId!)
+            session.items.push({
+              dishId:   dish!.id,
+              name:     dish!.platillo,
+              price:    dish!.precio,
+              quantity: qty
+            })
+            await sendText(
+              from,
+              `✅ Agregado ${qty} x ${dish!.platillo}.\n¿Deseas agregar otro platillo? (sí/no)`
+            )
+            session.step = 'ADD_MORE'
           }
-          const dish = await Platillos.findByPk(session.dishId!)
-          session.items.push({
-            dishId:   dish!.id,
-            name:     dish!.platillo,
-            price:    dish!.precio,
-            quantity: qty
-          })
-          await sendText(
-            from,
-            `Agregado ${qty} x ${dish!.platillo}.\n¿Deseas otro platillo? (sí/no)`
-          )
-          session.step = 'confirm'
           break
-        }
 
-        case 'confirm':
+        // —— 6. ¿Agregar más o confirmar? ——
+        case 'ADD_MORE':
           if (text.startsWith('s')) {
-            const [user] = await Usuario.findOrCreate({ where: { telefono: from }})
+            // reabrir categorías (lista interactiva)
+            const cats = await Menu.findAll()
+            const sections = [{
+              title: 'Categorías',
+              rows: cats.map(c => ({
+                id:    `CAT_${c.id}`,
+                title: c.nombre
+              }))
+            }]
+            await sendList(
+              from,
+              '📋 Menú del día',
+              'Selecciona otra categoría:',
+              'Usa el selector arriba',
+              sections
+            )
+            session.step = 'SELECT_CATEGORY'
+          } else {
+            // mostrar resumen y pasar a confirmar
+            let resumen = '📝 Tu pedido:\n'
+            let total  = 0
+            session.items.forEach(i => {
+              resumen += `- ${i.quantity} x ${i.name} ($${i.price * i.quantity})\n`
+              total += i.price * i.quantity
+            })
+            resumen += `\nTotal: $${total}\n¿Confirmas tu pedido? (sí/no)`
+            await sendText(from, resumen.trim())
+            session.step = 'CONFIRM'
+          }
+          break
+
+        // —— 7. Confirmar o cancelar ——
+        case 'CONFIRM':
+          if (text.startsWith('s')) {
+            // persistir pedido
+            const [user] = await Usuario.findOrCreate({ where: { telefono: from } })
             const total = session.items.reduce((a,i) => a + i.price * i.quantity, 0)
             const order = await Pedido.create({ usuarioId: user.id, total })
-            for (const i of session.items) {
+            for (const it of session.items) {
               await PedidoItem.create({
                 pedidoId:   order.id,
-                platilloId: i.dishId,
-                cantidad:   i.quantity
+                platilloId: it.dishId,
+                cantidad:   it.quantity
               })
             }
             await sendText(
               from,
-              `✅ Pedido #${order.id} registrado con total $${total}.\n¡Gracias!`
+              `🎉 Pedido #${order.id} registrado con total $${total}.\n¡Gracias!`
             )
-            sessions.delete(from)
-
           } else {
             await sendText(from, '❌ Pedido cancelado. Escribe "hola" para reiniciar.')
-            sessions.delete(from)
           }
+          sessions.delete(from)
           break
       }
-    } catch (err) {
-      console.error('Error WA flow:', err)
+
+    } catch (e) {
+      console.error('Error en flujo WA:', e)
       await sendText(from, '⚠️ Algo salió mal, inténtalo más tarde.')
       sessions.delete(from)
     }
 
+    // ACK 200 siempre
     res.sendStatus(200)
     return
   }
