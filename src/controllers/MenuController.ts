@@ -43,12 +43,11 @@ export class MenuController {
     const entry = req.body.entry?.[0]?.changes?.[0]?.value
     const msg   = entry?.messages?.[0]
     if (!msg) {
-      // Siempre respondemos 200 aunque no haya mensaje válido
       res.sendStatus(200)
       return
     }
 
-    // Hardcodeamos el número del negocio
+    // remitente hardcodeado
     const from = '526182583019'
     const raw  = msg.text?.body?.trim() || ''
     const text = raw.toLowerCase()
@@ -56,7 +55,7 @@ export class MenuController {
     // Log del chat
     fs.appendFileSync('wa_debug.log', `${new Date().toISOString()} ${from}: ${raw}\n`)
 
-    // Iniciar o recuperar la sesión
+    // iniciar/recuperar sesión
     let session = sessions.get(from)
     if (!session) {
       session = { step: 'WELCOME', items: [] }
@@ -65,7 +64,6 @@ export class MenuController {
 
     try {
       switch (session.step) {
-        // 1) Bienvenida
         case 'WELCOME':
           await sendButtons(
             from,
@@ -75,14 +73,12 @@ export class MenuController {
           session.step = 'MAIN_MENU'
           break
 
-        // 2) Manejo del botón “Ver menú”
         case 'MAIN_MENU':
           if (
             msg.type === 'interactive' &&
             msg.interactive.type === 'button_reply' &&
             msg.interactive.button_reply.id === 'VIEW_MENU'
           ) {
-            // 2.1 Cargar categorías
             const cats = await Menu.findAll()
             const sections = [{
               title: 'Categorías',
@@ -102,7 +98,6 @@ export class MenuController {
           }
           break
 
-        // 3) Selección de categoría
         case 'SELECT_CATEGORY':
           if (
             msg.type === 'interactive' &&
@@ -114,7 +109,6 @@ export class MenuController {
             const platos = await Platillos.findAll({
               where: { menuId: session.categoryId }
             })
-            // Si no hay platillos, reenvío categorías
             if (platos.length === 0) {
               await sendText(from, 'No hay platillos en esa categoría. Elige otra.')
               session.step = 'MAIN_MENU'
@@ -138,7 +132,6 @@ export class MenuController {
           }
           break
 
-        // 4) Selección de platillo
         case 'SELECT_DISH':
           if (
             msg.type === 'interactive' &&
@@ -156,7 +149,6 @@ export class MenuController {
           }
           break
 
-        // 5) Cantidad
         case 'ASK_QUANTITY': {
           const qty = parseInt(text, 10)
           if (isNaN(qty) || qty < 1) {
@@ -178,10 +170,8 @@ export class MenuController {
           break
         }
 
-        // 6) Agregar más o confirmar
         case 'ADD_MORE':
           if (text.startsWith('s')) {
-            // volvemos a categorías
             const cats = await Menu.findAll()
             const sections = [{
               title: 'Categorías',
@@ -199,7 +189,6 @@ export class MenuController {
             )
             session.step = 'SELECT_CATEGORY'
           } else {
-            // mostramos resumen
             let resumen = '📝 Tu pedido:\n'
             let total  = 0
             session.items.forEach(i => {
@@ -212,7 +201,6 @@ export class MenuController {
           }
           break
 
-        // 7) Confirmar
         case 'CONFIRM':
           if (text.startsWith('s')) {
             const [user] = await Usuario.findOrCreate({ where: { telefono: from } })
@@ -232,14 +220,13 @@ export class MenuController {
           sessions.delete(from)
           break
       }
-
     } catch (e) {
       console.error('Error en flujo WA:', e)
       await sendText(from, '⚠️ Algo salió mal, inténtalo más tarde.')
       sessions.delete(from)
     }
 
-    // Siempre devolvemos 200 a Meta
     res.sendStatus(200)
+    return
   }
 }
