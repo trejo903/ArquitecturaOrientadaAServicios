@@ -1,3 +1,4 @@
+// src/controllers/MenuController.ts
 import { Request, Response } from 'express'
 import fs from 'fs'
 import Menu from '../models/Menu'
@@ -52,10 +53,8 @@ export class MenuController {
     const raw  = msg.text?.body?.trim() || ''
     const text = raw.toLowerCase()
 
-    // Log del chat
     fs.appendFileSync('wa_debug.log', `${new Date().toISOString()} ${from}: ${raw}\n`)
 
-    // iniciar o recuperar sesión
     let session = sessions.get(from)
     if (!session) {
       session = { step: 'WELCOME', items: [] }
@@ -76,7 +75,7 @@ export class MenuController {
         case 'MAIN_MENU':
           if (
             msg.type === 'interactive' &&
-            msg.interactive.type === 'button_reply' &&
+            msg.interactive?.type === 'button_reply' &&
             msg.interactive.button_reply.id === 'VIEW_MENU'
           ) {
             const cats = await Menu.findAll()
@@ -98,56 +97,86 @@ export class MenuController {
           }
           break
 
-        case 'SELECT_CATEGORY':
-          if (
-            msg.type === 'interactive' &&
-            msg.interactive.type === 'list_reply'
-          ) {
-            session.categoryId = parseInt(
-              msg.interactive.list_reply.id.replace('CAT_', ''), 10
-            )
-            const platos = await Platillos.findAll({
-              where: { menuId: session.categoryId }
-            })
-            if (platos.length === 0) {
-              await sendText(from, 'No hay platillos en esa categoría. Elige otra.')
-              session.step = 'MAIN_MENU'
-              break
-            }
-            const sections = [{
-              title: 'Platillos',
-              rows: platos.map(p => ({
-                id:    `DISH_${p.id}`,
-                title: `${p.platillo} ($${p.precio})`
-              }))
-            }]
-            await sendList(
-              from,
-              '🍴 Elige un platillo',
-              'Selecciona tu platillo:',
-              'Usa el selector arriba',
-              sections
-            )
-            session.step = 'SELECT_DISH'
-          }
-          break
+        case 'SELECT_CATEGORY': {
+          // obtenemos todas las categorías
+          const cats = await Menu.findAll()
+          let catId: number | undefined
 
-        case 'SELECT_DISH':
-          if (
-            msg.type === 'interactive' &&
-            msg.interactive.type === 'list_reply'
-          ) {
-            session.dishId = parseInt(
-              msg.interactive.list_reply.id.replace('DISH_', ''), 10
-            )
-            const elegido = await Platillos.findByPk(session.dishId!)
-            await sendText(
-              from,
-              `¿Cuántas unidades de "${elegido!.platillo}" deseas?`
-            )
-            session.step = 'ASK_QUANTITY'
+          // 1) si viene por lista interactiva:
+          if (msg.type === 'interactive' && msg.interactive?.type === 'list_reply') {
+            catId = parseInt(msg.interactive.list_reply.id.replace('CAT_', ''), 10)
+          } else {
+            // 2) fallback por texto: número o nombre exacto
+            const idx = parseInt(text, 10)
+            if (!isNaN(idx) && idx >= 1 && idx <= cats.length) {
+              catId = cats[idx - 1].id
+            } else {
+              const m = cats.find(c => c.nombre.toLowerCase() === text)
+              if (m) catId = m.id
+            }
           }
+
+          if (!catId) {
+            // si no reconocemos, lo volvemos a enviar
+            await sendText(from, `❓ No entendí "${raw}". Selecciona o escribe el número/nombre de la categoría.`)
+            break
+          }
+
+          session.categoryId = catId
+          const platos = await Platillos.findAll({ where: { menuId: catId } })
+          if (platos.length === 0) {
+            await sendText(from, '🚫 No hay platillos en esa categoría. Elige otra.')
+            session.step = 'MAIN_MENU'
+            break
+          }
+
+          const sectionsPl = [{
+            title: 'Platillos',
+            rows: platos.map(p => ({
+              id:    `DISH_${p.id}`,
+              title: `${p.platillo} ($${p.precio})`
+            }))
+          }]
+          await sendList(
+            from,
+            '🍴 Elige un platillo',
+            'Selecciona tu platillo:',
+            'Usa selector arriba',
+            sectionsPl
+          )
+          session.step = 'SELECT_DISH'
           break
+        }
+
+        case 'SELECT_DISH': {
+          // buscamos platillos de la categoría actual
+          const platos = await Platillos.findAll({ where: { menuId: session.categoryId } })
+          let dishId: number | undefined
+
+          if (msg.type === 'interactive' && msg.interactive?.type === 'list_reply') {
+            dishId = parseInt(msg.interactive.list_reply.id.replace('DISH_', ''), 10)
+          } else {
+            // fallback por texto
+            const idx = parseInt(text, 10)
+            if (!isNaN(idx) && idx >= 1 && idx <= platos.length) {
+              dishId = platos[idx - 1].id
+            } else {
+              const m = platos.find(p => p.platillo.toLowerCase() === text)
+              if (m) dishId = m.id
+            }
+          }
+
+          if (!dishId) {
+            await sendText(from, `❓ No entendí "${raw}". Elige o escribe número/nombre del platillo.`)
+            break
+          }
+
+          session.dishId = dishId
+          const elegido = await Platillos.findByPk(dishId)!
+          await sendText(from, `¿Cuántas unidades de "${elegido.platillo}" deseas?`)
+          session.step = 'ASK_QUANTITY'
+          break
+        }
 
         case 'ASK_QUANTITY': {
           const qty = parseInt(text, 10)
@@ -155,16 +184,16 @@ export class MenuController {
             await sendText(from, '⚠️ Ingresa un número mayor que 0.')
             break
           }
-          const dish = await Platillos.findByPk(session.dishId!)
+          const dish = await Platillos.findByPk(session.dishId!)!
           session.items.push({
-            dishId:   dish!.id,
-            name:     dish!.platillo,
-            price:    dish!.precio,
+            dishId:   dish.id,
+            name:     dish.platillo,
+            price:    dish.precio,
             quantity: qty
           })
           await sendText(
             from,
-            `✅ Agregado ${qty} x ${dish!.platillo}.\n¿Deseas agregar otro platillo? (sí/no)`
+            `✅ Agregado ${qty} x ${dish.platillo}.\n¿Deseas agregar otro platillo? (sí/no)`
           )
           session.step = 'ADD_MORE'
           break
@@ -172,6 +201,7 @@ export class MenuController {
 
         case 'ADD_MORE':
           if (text.startsWith('s')) {
+            // volvemos a categorías
             const cats = await Menu.findAll()
             const sections = [{
               title: 'Categorías',
@@ -189,8 +219,9 @@ export class MenuController {
             )
             session.step = 'SELECT_CATEGORY'
           } else {
+            // confirmación final
             let resumen = '📝 Tu pedido:\n'
-            let total  = 0
+            let total   = 0
             session.items.forEach(i => {
               resumen += `- ${i.quantity} x ${i.name} ($${i.price * i.quantity})\n`
               total += i.price * i.quantity
@@ -204,8 +235,8 @@ export class MenuController {
         case 'CONFIRM':
           if (text.startsWith('s')) {
             const [user] = await Usuario.findOrCreate({ where: { telefono: from } })
-            const total = session.items.reduce((a,i) => a + i.price * i.quantity, 0)
-            const order = await Pedido.create({ usuarioId: user.id, total })
+            const total  = session.items.reduce((a,i) => a + i.price * i.quantity, 0)
+            const order  = await Pedido.create({ usuarioId: user.id, total })
             for (const it of session.items) {
               await PedidoItem.create({
                 pedidoId:   order.id,
