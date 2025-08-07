@@ -10,7 +10,7 @@ const HEADERS = {
 export async function sendText(to: string, body: string) {
   const payload = {
     messaging_product: 'whatsapp',
-    to:'526182113919',
+    to:'526182583019',
     type: 'text',
     text: { body, preview_url: false }
   }
