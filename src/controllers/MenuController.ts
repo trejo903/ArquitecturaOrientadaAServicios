@@ -43,17 +43,20 @@ export class MenuController {
     const entry = req.body.entry?.[0]?.changes?.[0]?.value
     const msg   = entry?.messages?.[0]
     if (!msg) {
+      // Siempre respondemos 200 aunque no haya mensaje válido
       res.sendStatus(200)
       return
     }
 
-    // remitente hardcodeado
+    // Hardcodeamos el número del negocio
     const from = '526182583019'
     const raw  = msg.text?.body?.trim() || ''
     const text = raw.toLowerCase()
+
+    // Log del chat
     fs.appendFileSync('wa_debug.log', `${new Date().toISOString()} ${from}: ${raw}\n`)
 
-    // iniciar/recuperar sesión
+    // Iniciar o recuperar la sesión
     let session = sessions.get(from)
     if (!session) {
       session = { step: 'WELCOME', items: [] }
@@ -79,6 +82,7 @@ export class MenuController {
             msg.interactive.type === 'button_reply' &&
             msg.interactive.button_reply.id === 'VIEW_MENU'
           ) {
+            // 2.1 Cargar categorías
             const cats = await Menu.findAll()
             const sections = [{
               title: 'Categorías',
@@ -110,6 +114,12 @@ export class MenuController {
             const platos = await Platillos.findAll({
               where: { menuId: session.categoryId }
             })
+            // Si no hay platillos, reenvío categorías
+            if (platos.length === 0) {
+              await sendText(from, 'No hay platillos en esa categoría. Elige otra.')
+              session.step = 'MAIN_MENU'
+              break
+            }
             const sections = [{
               title: 'Platillos',
               rows: platos.map(p => ({
@@ -171,7 +181,7 @@ export class MenuController {
         // 6) Agregar más o confirmar
         case 'ADD_MORE':
           if (text.startsWith('s')) {
-            // volver a categorías
+            // volvemos a categorías
             const cats = await Menu.findAll()
             const sections = [{
               title: 'Categorías',
@@ -189,6 +199,7 @@ export class MenuController {
             )
             session.step = 'SELECT_CATEGORY'
           } else {
+            // mostramos resumen
             let resumen = '📝 Tu pedido:\n'
             let total  = 0
             session.items.forEach(i => {
@@ -228,7 +239,7 @@ export class MenuController {
       sessions.delete(from)
     }
 
-    // ACK 200 siempre
+    // Siempre devolvemos 200 a Meta
     res.sendStatus(200)
   }
 }
