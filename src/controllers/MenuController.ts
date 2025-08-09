@@ -22,7 +22,6 @@ interface Session {
   categoryId?: number;
   dishId?: number;
   items: { dishId: number; name: string; price: number; quantity: number }[];
-  // para paginación
   catOffset: number;
   dishOffset: number;
 }
@@ -32,24 +31,36 @@ const sessions = new Map<string, Session>();
 const VERIFY_TOKEN =
   'EAARt5paboZC8BPDbqIjocLuI5fEcQJI3ngJ1ZAZCRIVz8ZAEbscplO114MZB76jIfWV79pjLxw4cwNLN0y22Br4qZCLCvNj37bnZAPdcwY8lT2SphYkqzH1anHiQ5yhboAxt5aWlUX7mZCMdM0ZBcYl9WS4yeZC9QmppLnf4GFfqir7LsV9XhDZBJvcpslHKRmgF2ddZAzQbMDRUC603QSPjSkm1KLZB1Ej4EltUnPuXOVyzc';
 
-// Helpers de paginación (máx 10 filas TOTAL; usamos 9 + 1 "Ver más")
-const PAGE_SIZE = 9;
-function buildPagedRows<T extends { id: number; nombre?: string; platillo?: string; precio?: number }>(
-  list: T[],
-  offset: number,
-  type: 'CAT' | 'DISH'
-) {
+// ====== Límites de WhatsApp ======
+// Fila: title <= 24 chars, description <= 72 chars, máx 10 filas totales.
+const TITLE_MAX = 24;
+const DESC_MAX = 72;
+const PAGE_SIZE = 9; // 9 + "Ver más" = 10
+
+const truncate = (s: string, n: number) =>
+  s.length <= n ? s : s.slice(0, Math.max(0, n - 1)).trimEnd() + '…';
+
+// Construye filas paginadas cumpliendo límites
+function buildPagedRows<
+  T extends { id: number; nombre?: string; platillo?: string; precio?: number }
+>(list: T[], offset: number, type: 'CAT' | 'DISH') {
   const slice = list.slice(offset, offset + PAGE_SIZE);
+
   const rows = slice.map((item) => {
-    const title =
-      type === 'CAT'
-        ? String(item.nombre)
-        : `${item.platillo} ($${item.precio})`;
-  return { id: `${type}_${item.id}`, title };
+    if (type === 'CAT') {
+      const title = truncate(String(item.nombre ?? ''), TITLE_MAX);
+      return { id: `CAT_${item.id}`, title };
+    } else {
+      const name = String(item.platillo ?? '');
+      const title = truncate(name, TITLE_MAX); // solo nombre
+      const description = truncate(`$${item.precio}`, DESC_MAX); // precio en description
+      return { id: `DISH_${item.id}`, title, description };
+    }
   });
 
   const hasMore = offset + PAGE_SIZE < list.length;
   if (hasMore) rows.push({ id: `${type}_MORE`, title: '▶ Ver más' }); // 10ma fila
+
   return { rows, hasMore };
 }
 
@@ -58,23 +69,30 @@ export class MenuController {
   static verify(req: Request, res: Response) {
     const token = req.query['hub.verify_token'];
     const challenge = req.query['hub.challenge'] as string;
-    if (token === VERIFY_TOKEN) res.status(200).send(challenge);
+    if (token === VERIFY_TOKEN) {
+      res.status(200).send(challenge);
+      return
+    }
     res.status(403).send('Token inválido');
+    return
   }
 
   // POST /webhook
   static async webhook(req: Request, res: Response) {
     const entry = req.body.entry?.[0]?.changes?.[0]?.value;
     const msg = entry?.messages?.[0];
-    if (!msg){
+    if (!msg) {
       res.sendStatus(200);
+      return; // <<<< IMPORTANTÍSIMO
     }
 
     // En prod usa el real: const from = msg.from;
     const from = '526182583019';
 
-    const raw = msg.text?.body?.trim() || '';
+    // En mensajes interactivos no existe msg.text
+    const raw = (msg.text?.body ?? '').trim();
     const text = raw.toLowerCase();
+
     fs.appendFileSync('wa_debug.log', `${new Date().toISOString()} ${from}: ${raw}\n`);
 
     let session = sessions.get(from);
@@ -87,21 +105,20 @@ export class MenuController {
       switch (session.step) {
         case 'WELCOME': {
           await sendButtons(from, '🍽️ ¡Bienvenido a Restaurante X! ¿Qué deseas hacer hoy?', [
-            { id: 'VIEW_MENU', title: 'Ver menú' }
+            { id: 'VIEW_MENU', title: 'Ver menú' },
           ]);
           session.step = 'MAIN_MENU';
           break;
         }
 
         case 'MAIN_MENU': {
-          const pressed =
-            (msg.type === 'interactive' &&
-              msg.interactive?.type === 'button_reply' &&
-              msg.interactive.button_reply.id === 'VIEW_MENU') ||
-            text.includes('ver menú');
+          const isButton =
+            msg.type === 'interactive' &&
+            msg.interactive?.type === 'button_reply' &&
+            msg.interactive.button_reply.id === 'VIEW_MENU';
 
-          if (pressed) {
-            session.catOffset = 0; // reset paginación
+          if (isButton || text.includes('ver menú')) {
+            session.catOffset = 0;
             const cats = await Menu.findAll();
             if (cats.length === 0) {
               await sendText(from, '🚫 No hay categorías disponibles.');
@@ -123,10 +140,9 @@ export class MenuController {
         case 'SELECT_CATEGORY': {
           const cats = await Menu.findAll();
 
-          // ¿tocó "Ver más"?
+          // ¿Ver más?
           if (msg.type === 'interactive' && msg.interactive?.type === 'list_reply') {
             const id = msg.interactive.list_reply.id;
-
             if (id === 'CAT_MORE') {
               session.catOffset += PAGE_SIZE;
               const { rows } = buildPagedRows(cats as any, session.catOffset, 'CAT');
@@ -141,16 +157,17 @@ export class MenuController {
             }
           }
 
-          // seleccionar categoría por list / número / nombre
+          // Selección real
           let catId: number | undefined;
           if (msg.type === 'interactive' && msg.interactive?.type === 'list_reply') {
             const id = msg.interactive.list_reply.id;
             if (id.startsWith('CAT_')) catId = +id.replace('CAT_', '');
           } else {
-            const idx = +text;
-            if (!isNaN(idx) && idx >= 1 && idx <= cats.length) catId = cats[idx - 1].id;
-            else {
-              const found = cats.find((c: any) => c.nombre.toLowerCase() === text);
+            const idx = Number(text);
+            if (!Number.isNaN(idx) && idx >= 1 && idx <= cats.length) {
+              catId = cats[idx - 1].id;
+            } else {
+              const found = cats.find((c: any) => c.nombre?.toLowerCase() === text);
               if (found) catId = (found as any).id;
             }
           }
@@ -164,7 +181,7 @@ export class MenuController {
           }
 
           session.categoryId = catId;
-          session.dishOffset = 0; // reset paginación de platos
+          session.dishOffset = 0;
 
           const platos = await Platillos.findAll({ where: { menuId: catId } });
           if (platos.length === 0) {
@@ -188,7 +205,7 @@ export class MenuController {
         case 'SELECT_DISH': {
           const platos = await Platillos.findAll({ where: { menuId: session.categoryId } });
 
-          // manejar "Ver más"
+          // Ver más
           if (msg.type === 'interactive' && msg.interactive?.type === 'list_reply') {
             const id = msg.interactive.list_reply.id;
             if (id === 'DISH_MORE') {
@@ -205,15 +222,17 @@ export class MenuController {
             }
           }
 
+          // Selección real
           let dishId: number | undefined;
           if (msg.type === 'interactive' && msg.interactive?.type === 'list_reply') {
             const id = msg.interactive.list_reply.id;
             if (id.startsWith('DISH_')) dishId = +id.replace('DISH_', '');
           } else {
-            const idx = +text;
-            if (!isNaN(idx) && idx >= 1 && idx <= platos.length) dishId = platos[idx - 1].id;
-            else {
-              const found = platos.find((p: any) => p.platillo.toLowerCase() === text);
+            const idx = Number(text);
+            if (!Number.isNaN(idx) && idx >= 1 && idx <= platos.length) {
+              dishId = platos[idx - 1].id;
+            } else {
+              const found = platos.find((p: any) => p.platillo?.toLowerCase() === text);
               if (found) dishId = (found as any).id;
             }
           }
@@ -233,8 +252,8 @@ export class MenuController {
         }
 
         case 'ASK_QUANTITY': {
-          const qty = +text;
-          if (isNaN(qty) || qty < 1) {
+          const qty = Number(text);
+          if (Number.isNaN(qty) || qty < 1) {
             await sendText(from, '⚠️ Ingresa un número mayor que 0.');
             break;
           }
@@ -243,17 +262,20 @@ export class MenuController {
             dishId: (dish as any).id,
             name: (dish as any).platillo,
             price: (dish as any).precio,
-            quantity: qty
+            quantity: qty,
           });
 
-          await sendText(from, `✅ Agregado ${qty} x ${(dish as any).platillo}.\n¿Deseas agregar otro platillo? (sí/no)`);
+          await sendText(
+            from,
+            `✅ Agregado ${qty} x ${(dish as any).platillo}.\n¿Deseas agregar otro platillo? (sí/no)`
+          );
           session.step = 'ADD_MORE';
           break;
         }
 
         case 'ADD_MORE': {
           if (text.startsWith('s')) {
-            // Volver a categorías, reiniciando paginación
+            // Volver a categorías
             session.catOffset = 0;
             const cats = await Menu.findAll();
             const { rows } = buildPagedRows(cats as any, session.catOffset, 'CAT');
@@ -289,7 +311,7 @@ export class MenuController {
               await PedidoItem.create({
                 pedidoId: (order as any).id,
                 platilloId: it.dishId,
-                cantidad: it.quantity
+                cantidad: it.quantity,
               });
             }
             await sendText(from, `🎉 Pedido #${(order as any).id} registrado con total $${total}.\n¡Gracias!`);
