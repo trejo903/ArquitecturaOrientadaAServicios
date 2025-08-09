@@ -24,8 +24,17 @@ interface Session {
   items: { dishId: number; name: string; price: number; quantity: number }[];
 }
 
+// Utilidad: parte un arreglo en trozos
+const chunk = <T,>(arr: T[], size: number) =>
+  Array.from({ length: Math.ceil(arr.length / size) }, (_, i) =>
+    arr.slice(i * size, i * size + size)
+  );
+
 const sessions = new Map<string, Session>();
-const VERIFY_TOKEN = 'EAARt5paboZC8BPDbqIjocLuI5fEcQJI3ngJ1ZAZCRIVz8ZAEbscplO114MZB76jIfWV79pjLxw4cwNLN0y22Br4qZCLCvNj37bnZAPdcwY8lT2SphYkqzH1anHiQ5yhboAxt5aWlUX7mZCMdM0ZBcYl9WS4yeZC9QmppLnf4GFfqir7LsV9XhDZBJvcpslHKRmgF2ddZAzQbMDRUC603QSPjSkm1KLZB1Ej4EltUnPuXOVyzc';
+
+// ⚠️ Usa tu verify token real
+const VERIFY_TOKEN =
+  'EAARt5paboZC8BPDbqIjocLuI5fEcQJI3ngJ1ZAZCRIVz8ZAEbscplO114MZB76jIfWV79pjLxw4cwNLN0y22Br4qZCLCvNj37bnZAPdcwY8lT2SphYkqzH1anHiQ5yhboAxt5aWlUX7mZCMdM0ZBcYl9WS4yeZC9QmppLnf4GFfqir7LsV9XhDZBJvcpslHKRmgF2ddZAzQbMDRUC603QSPjSkm1KLZB1Ej4EltUnPuXOVyzc';
 
 export class MenuController {
   // GET /webhook → verificación
@@ -43,13 +52,16 @@ export class MenuController {
   static async webhook(req: Request, res: Response) {
     const entry = req.body.entry?.[0]?.changes?.[0]?.value;
     const msg = entry?.messages?.[0];
+
     if (!msg) {
       res.sendStatus(200);
-      return
+      return;
     }
 
-    // Hardcodeamos el número de negocio
+    // ⚠️ Si quieres usar el remitente real: const from = msg.from;
+    // Si mantienes sandbox o pruebas internas, deja el hardcode:
     const from = '526182583019';
+
     const raw = msg.text?.body?.trim() || '';
     const text = raw.toLowerCase();
 
@@ -66,42 +78,56 @@ export class MenuController {
     try {
       switch (session.step) {
         // 1) Bienvenida
-        case 'WELCOME':
-          await sendButtons(
-            from,
-            '🍽️ ¡Bienvenido a Restaurante X! ¿Qué deseas hacer hoy?',
-            [{ id: 'VIEW_MENU', title: 'Ver menú' }]
-          );
+        case 'WELCOME': {
+          await sendButtons(from, '🍽️ ¡Bienvenido a Restaurante X! ¿Qué deseas hacer hoy?', [
+            { id: 'VIEW_MENU', title: 'Ver menú' }
+          ]);
           session.step = 'MAIN_MENU';
           break;
+        }
 
         // 2) Menú principal: botón o texto
-        case 'MAIN_MENU':
-          if (
-            // botón interactivo
-            (msg.type === 'interactive' && msg.interactive?.type === 'button_reply' &&
-              msg.interactive.button_reply.id === 'VIEW_MENU')
-            ||
-            // o texto manual “ver menú”
-            text.includes('ver menú')
-          ) {
+        case 'MAIN_MENU': {
+          const pressedViewMenu =
+            (msg.type === 'interactive' &&
+              msg.interactive?.type === 'button_reply' &&
+              msg.interactive.button_reply.id === 'VIEW_MENU') ||
+            text.includes('ver menú');
+
+          if (pressedViewMenu) {
             const cats = await Menu.findAll();
-            const sections = [
-              {
-                title: 'Categorías',
-                rows: cats.map(c => ({ id: `CAT_${c.id}`, title: c.nombre }))
-              }
-            ];
+
+            const catRows = cats.map((c) => ({ id: `CAT_${c.id}`, title: c.nombre }));
+            const catSections = chunk(catRows, 10).slice(0, 10).map((rows, i) => ({
+              title: `Categorías ${i + 1}`,
+              rows
+            }));
+
+            if (catRows.length === 0) {
+              await sendText(from, '🚫 No hay categorías disponibles.');
+              break;
+            }
+
+            if (catRows.length > 100) {
+              await sendText(
+                from,
+                'Hay muchas categorías. Escribe el nombre exacto de la categoría que deseas.'
+              );
+              session.step = 'SELECT_CATEGORY';
+              break;
+            }
+
             await sendList(
               from,
               '📋 Menú del día',
               'Selecciona una categoría:',
               'Usa el selector arriba',
-              sections
+              catSections
             );
             session.step = 'SELECT_CATEGORY';
           }
           break;
+        }
 
         // 3) Selección de categoría (lista o texto/número/nombre)
         case 'SELECT_CATEGORY': {
@@ -118,7 +144,7 @@ export class MenuController {
               catId = cats[idx - 1].id;
             } else {
               // intento por nombre exacto
-              const found = cats.find(c => c.nombre.toLowerCase() === text);
+              const found = cats.find((c) => c.nombre.toLowerCase() === text);
               if (found) catId = found.id;
             }
           }
@@ -129,6 +155,7 @@ export class MenuController {
           }
 
           session.categoryId = catId;
+
           const platos = await Platillos.findAll({ where: { menuId: catId } });
           if (platos.length === 0) {
             await sendText(from, '🚫 No hay platillos en esa categoría. Elige otra.');
@@ -136,15 +163,26 @@ export class MenuController {
             break;
           }
 
-          const sectionsPl = [
-            {
-              title: 'Platillos',
-              rows: platos.map(p => ({
-                id: `DISH_${p.id}`,
-                title: `${p.platillo} ($${p.precio})`
-              }))
-            }
-          ];
+          // Construir filas de platillos y secciones (límite WA)
+          const dishRows = platos.map((p) => ({
+            id: `DISH_${p.id}`,
+            title: `${p.platillo} ($${p.precio})`
+          }));
+
+          const sectionsPl = chunk(dishRows, 10).slice(0, 10).map((rows, i) => ({
+            title: `Platillos ${i + 1}`,
+            rows
+          }));
+
+          if (dishRows.length > 100) {
+            await sendText(
+              from,
+              'Hay demasiados platillos en esta categoría. Escribe el nombre exacto del platillo que deseas.'
+            );
+            session.step = 'SELECT_DISH';
+            break;
+          }
+
           await sendList(
             from,
             '🍴 Elige un platillo',
@@ -168,7 +206,7 @@ export class MenuController {
             if (!isNaN(idx) && idx >= 1 && idx <= platos.length) {
               dishId = platos[idx - 1].id;
             } else {
-              const found = platos.find(p => p.platillo.toLowerCase() === text);
+              const found = platos.find((p) => p.platillo.toLowerCase() === text);
               if (found) dishId = found.id;
             }
           }
@@ -192,6 +230,7 @@ export class MenuController {
             await sendText(from, '⚠️ Ingresa un número mayor que 0.');
             break;
           }
+
           const dish = await Platillos.findByPk(session.dishId!)!;
           session.items.push({
             dishId: dish.id,
@@ -199,38 +238,45 @@ export class MenuController {
             price: dish.precio,
             quantity: qty
           });
-          await sendText(
-            from,
-            `✅ Agregado ${qty} x ${dish.platillo}.\n¿Deseas agregar otro platillo? (sí/no)`
-          );
+
+          await sendText(from, `✅ Agregado ${qty} x ${dish.platillo}.\n¿Deseas agregar otro platillo? (sí/no)`);
           session.step = 'ADD_MORE';
           break;
         }
 
         // 6) Agregar más o confirmar pedido
-        case 'ADD_MORE':
+        case 'ADD_MORE': {
           if (text.startsWith('s')) {
-            // vuelvo a categorías
+            // Volver a categorías (paginadas)
             const cats = await Menu.findAll();
-            const sections = [
-              {
-                title: 'Categorías',
-                rows: cats.map(c => ({ id: `CAT_${c.id}`, title: c.nombre }))
-              }
-            ];
+            const catRows = cats.map((c) => ({ id: `CAT_${c.id}`, title: c.nombre }));
+            const catSections = chunk(catRows, 10).slice(0, 10).map((rows, i) => ({
+              title: `Categorías ${i + 1}`,
+              rows
+            }));
+
+            if (catRows.length > 100) {
+              await sendText(
+                from,
+                'Hay muchas categorías. Escribe el nombre exacto de la categoría que deseas.'
+              );
+              session.step = 'SELECT_CATEGORY';
+              break;
+            }
+
             await sendList(
               from,
               '📋 Menú del día',
               'Selecciona otra categoría:',
               'Usa el selector arriba',
-              sections
+              catSections
             );
             session.step = 'SELECT_CATEGORY';
           } else {
-            // muestro resumen
+            // Mostrar resumen
             let resumen = '📝 Tu pedido:\n';
             let total = 0;
-            session.items.forEach(i => {
+            session.items.forEach((i) => {
               resumen += `- ${i.quantity} x ${i.name} ($${i.price * i.quantity})\n`;
               total += i.price * i.quantity;
             });
@@ -239,12 +285,14 @@ export class MenuController {
             session.step = 'CONFIRM';
           }
           break;
+        }
 
         // 7) Confirmación final
-        case 'CONFIRM':
+        case 'CONFIRM': {
           if (text.startsWith('s')) {
             const [user] = await Usuario.findOrCreate({ where: { telefono: from } });
             const total = session.items.reduce((a, i) => a + i.price * i.quantity, 0);
+
             const order = await Pedido.create({ usuarioId: user.id, total });
             for (const it of session.items) {
               await PedidoItem.create({
@@ -259,10 +307,11 @@ export class MenuController {
           }
           sessions.delete(from);
           break;
+        }
       }
-
-    } catch (e) {
-      console.error('❌ Error en flujo WA:', e);
+    } catch (e: any) {
+      // Log del error real de la API de WhatsApp para depurar límites u otros problemas
+      console.error('❌ Error en flujo WA:', e?.response?.data || e);
       await sendText(from, '⚠️ Algo salió mal, inténtalo más tarde.');
       sessions.delete(from);
     }
