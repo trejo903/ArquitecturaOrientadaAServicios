@@ -81,7 +81,7 @@ export class MenuController {
   static async webhook(req: Request, res: Response) {
     const entry = req.body.entry?.[0]?.changes?.[0]?.value;
     const msg = entry?.messages?.[0];
-    console.log(msg)
+    console.log(entry)
     if (!msg) {
       res.sendStatus(200);
       return; // <<<< IMPORTANTÍSIMO

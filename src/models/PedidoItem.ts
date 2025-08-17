@@ -21,3 +21,4 @@ export default class PedidoItem extends Model{
     @BelongsTo(()=>Platillos)
     declare platillo:Platillos
 }
+
