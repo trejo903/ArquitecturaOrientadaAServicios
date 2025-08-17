@@ -82,6 +82,7 @@ export class MenuController {
     const entry = req.body.entry?.[0]?.changes?.[0]?.value;
     const msg = entry?.messages?.[0];
     console.log(entry)
+    console.log('-----------------------------------------------------------------------------')
     if (!msg) {
       res.sendStatus(200);
       return; // <<<< IMPORTANTÍSIMO
